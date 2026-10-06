@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>建議書</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #1c1c1e);
+    --hint: var(--tg-theme-hint-color, #8e8e93);
+    --card: var(--tg-theme-secondary-bg-color, #f2f2f7);
+    --accent: var(--tg-theme-button-color, #2481cc);
+    --on-accent: var(--tg-theme-button-text-color, #ffffff);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px 16px 96px; background: var(--bg); color: var(--text);
+         font: 16px/1.5 -apple-system, "PingFang TC", "Noto Sans TC", sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--hint); font-size: 13px; margin-bottom: 16px; }
+  label.field { display: block; font-size: 13px; color: var(--hint); margin: 18px 0 6px; }
+  input[type=text], input[type=number] { width: 100%; padding: 12px; border: 0; border-radius: 10px;
+         background: var(--card); color: var(--text); font-size: 16px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { padding: 10px 14px; border-radius: 10px; background: var(--card); border: 2px solid transparent;
+          color: var(--text); font-size: 15px; cursor: pointer; user-select: none; }
+  .chip.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .chip small { display: block; color: var(--hint); font-weight: 400; font-size: 11px; }
+  .row { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 14px; }
+  .row input { width: 20px; height: 20px; }
+  .err { color: #d93025; font-size: 13px; min-height: 20px; margin-top: 14px; }
+  .hide { display: none; }
+  button#send { position: fixed; left: 16px; right: 16px; bottom: 16px; padding: 14px; border: 0;
+          border-radius: 12px; background: var(--accent); color: var(--on-accent); font-size: 16px; }
+</style>
+</head>
+<body>
+<h1>建議書</h1>
+<div class="sub">填完按送出，Bot 會先給你看一次確認畫面，按「送出」才會真的執行。</div>
+
+<label class="field">險種</label>
+<div class="chips" id="products"></div>
+
+<label class="field" for="name">被保險人姓名</label>
+<input type="text" id="name" autocomplete="off" placeholder="王大明">
+
+<div class="row"><input type="checkbox" id="roster"><label for="roster">名冊裡有這位客戶（性別、生日由 Bot 帶入）</label></div>
+
+<div id="person">
+  <label class="field">性別</label>
+  <div class="chips" id="gender"><div class="chip" data-v="男">男</div><div class="chip" data-v="女">女</div></div>
+  <label class="field" for="birth">民國生日，或只填年齡</label>
+  <input type="text" id="birth" inputmode="numeric" autocomplete="off" placeholder="600115　或　45">
+</div>
+
+<label class="field">繳費年期</label>
+<div class="chips" id="terms"></div>
+
+<label class="field" id="amountLabel">保額</label>
+<div class="chips" id="amounts"></div>
+<input type="number" id="amountCustom" class="hide" inputmode="numeric" placeholder="自行輸入" style="margin-top:8px">
+
+<div class="err" id="err"></div>
+<button id="send">送出到 Bot</button>
+
+<script>
+const SPECS = [{"code": "WEHS", "category": "實支實付", "name": "實健溢百住院醫療終身保險", "label": "實支實付", "terms": [10, 20, 30], "termAgeMax": {}, "amountLabel": "計劃", "amountUnit": "", "amountChoices": [30, 20, 10], "amountFree": false, "ageMin": 0, "ageMax": 70}, {"code": "HC", "category": "癌症醫療", "name": "心滿溢足癌症健康保險", "label": "癌症險", "terms": [10, 20], "termAgeMax": {}, "amountLabel": "保額", "amountUnit": "萬", "amountChoices": [100, 50, 80, 60, 30], "amountFree": true, "ageMin": 0, "ageMax": 80}, {"code": "FLTC", "category": "長期照顧", "name": "輕鬆陪伴長期照顧健康保險", "label": "長照險", "terms": [10, 20, 30], "termAgeMax": {"20": 60, "30": 60}, "amountLabel": "保額", "amountUnit": "萬", "amountChoices": [36, 30, 24, 20, 12], "amountFree": true, "ageMin": 15, "ageMax": 70}];
+const tg = window.Telegram && window.Telegram.WebApp;
+const $ = id => document.getElementById(id);
+const state = {product: null, gender: null, term: null, amount: null};
+
+function chips(box, items, key, onPick) {
+  box.innerHTML = '';
+  for (const it of items) {
+    const el = document.createElement('div');
+    el.className = 'chip' + (state[key] === it.value ? ' on' : '');
+    el.innerHTML = it.html;
+    el.onclick = () => { state[key] = it.value; onPick && onPick(it.value); render(); };
+    box.appendChild(el);
+  }
+}
+
+function render() {
+  $('err').textContent = '';
+  chips($('products'), SPECS.map(s => ({value: s.code, html: s.label + '<small>' + s.code + '・' + s.category + '</small>'})),
+        'product', () => { state.term = null; state.amount = null; $('amountCustom').value = ''; });
+  const spec = SPECS.find(s => s.code === state.product);
+  for (const c of $('gender').children) c.className = 'chip' + (state.gender === c.dataset.v ? ' on' : '');
+  $('person').className = $('roster').checked ? 'hide' : '';
+  chips($('terms'), (spec ? spec.terms : []).map(t => ({value: t, html: t + ' 年期'})), 'term');
+  $('amountLabel').textContent = spec ? spec.amountLabel + (spec.amountUnit ? '（' + spec.amountUnit + '）' : '') : '保額';
+  chips($('amounts'), (spec ? spec.amountChoices : []).map(a => ({value: a, html: String(a)})), 'amount',
+        () => { $('amountCustom').value = ''; });
+  $('amountCustom').className = spec && spec.amountFree ? '' : 'hide';
+}
+
+for (const c of $('gender').children) c.onclick = () => { state.gender = c.dataset.v; render(); };
+$('roster').onchange = render;
+$('amountCustom').oninput = () => { if ($('amountCustom').value) { state.amount = null; render(); } };
+
+function collect() {
+  const spec = SPECS.find(s => s.code === state.product);
+  if (!spec) return '請選險種';
+  const name = $('name').value.trim();
+  if (name.length < 2) return '請填姓名';
+  const out = {product: spec.code, name};
+  if (!$('roster').checked) {
+    if (!state.gender) return '請選性別（或勾「名冊裡有這位客戶」）';
+    const birth = $('birth').value.trim();
+    if (!/^\d{1,3}$/.test(birth) && birth.replace(/\D/g, '').length < 6) return '請填民國生日（例如 600115）或年齡';
+    out.gender = state.gender; out.birth = birth;
+  }
+  if (!state.term) return '請選繳費年期';
+  out.term = state.term;
+  const custom = parseInt($('amountCustom').value, 10);
+  out.amount = state.amount || (spec.amountFree && custom > 0 ? custom : null);
+  if (!out.amount) return '請選' + spec.amountLabel;
+  return out;
+}
+
+$('send').onclick = () => {
+  const r = collect();
+  if (typeof r === 'string') { $('err').textContent = r; return; }
+  $('err').textContent = '';
+  if (tg && tg.sendData) { tg.sendData(JSON.stringify(r)); }
+  else { $('err').textContent = '請從 Telegram 裡的「建議書表單」按鈕開啟這一頁。'; }
+};
+
+if (tg) { tg.ready(); tg.expand(); }
+if (SPECS.length === 1) state.product = SPECS[0].code;
+render();
+</script>
+</body>
+</html>
